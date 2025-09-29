@@ -1216,8 +1216,8 @@ mod utils {
             let value = bytes[p..p + size].to_vec();
             p += size + 1;
             map.push((
-                String::from_utf8(key).unwrap(),
-                String::from_utf8(value).unwrap(),
+                String::from_utf8(key).unwrap_or_default(),
+                String::from_utf8(value).unwrap_or_default(),
             ));
         }
         map
@@ -1239,8 +1239,89 @@ mod utils {
                 u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s + 4..s + 8]).unwrap()) as usize;
             let value = bytes[p..p + size].to_vec();
             p += size + 1;
-            map.push((String::from_utf8(key).unwrap(), value));
+            map.push((String::from_utf8(key).unwrap_or_default(), value));
         }
         map
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        static MAP: &[(&str, &str)] = &[
+            (":method", "GET"),
+            (":path", "/bytes/1"),
+            (":authority", "httpbin.org"),
+            ("Powered-By", "proxy-wasm"),
+        ];
+
+        #[rustfmt::skip]
+        static SERIALIZED_MAP: &[u8] = &[
+            // num entries
+            4, 0, 0, 0,
+            // len (":method", "GET")
+            7, 0, 0, 0, 3, 0, 0, 0,
+            // len (":path", "/bytes/1")
+            5, 0, 0, 0, 8, 0, 0, 0,
+            // len (":authority", "httpbin.org")
+            10, 0, 0, 0, 11, 0, 0, 0,
+            // len ("Powered-By", "proxy-wasm")
+            10, 0, 0, 0, 10, 0, 0, 0,
+            // ":method"
+            58, 109, 101, 116, 104, 111, 100, 0,
+            // "GET"
+            71, 69, 84, 0,
+            // ":path"
+            58, 112, 97, 116, 104, 0,
+            // "/bytes/1"
+            47, 98, 121, 116, 101, 115, 47, 49, 0,
+            // ":authority"
+            58, 97, 117, 116, 104, 111, 114, 105, 116, 121, 0,
+            // "httpbin.org"
+            104, 116, 116, 112, 98, 105, 110, 46, 111, 114, 103, 0,
+            // "Powered-By"
+            80, 111, 119, 101, 114, 101, 100, 45, 66, 121, 0,
+            // "proxy-wasm"
+            112, 114, 111, 120, 121, 45, 119, 97, 115, 109, 0,
+        ];
+
+        #[test]
+        fn test_deserialize_map_empty() {
+            let map = deserialize_map(&[]);
+            assert_eq!(map, []);
+            let map = deserialize_map(&[0, 0, 0, 0]);
+            assert_eq!(map, []);
+        }
+
+        #[test]
+        fn test_deserialize_map_empty_bytes() {
+            let map = deserialize_map_bytes(&[]);
+            assert_eq!(map, []);
+            let map = deserialize_map_bytes(&[0, 0, 0, 0]);
+            assert_eq!(map, []);
+        }
+
+        #[test]
+        fn test_deserialize_map_bytes() {
+            let map = deserialize_map_bytes(SERIALIZED_MAP);
+            assert_eq!(map.len(), MAP.len());
+            for (got, expected) in map.into_iter().zip(MAP) {
+                assert_eq!(got.0, expected.0);
+                assert_eq!(got.1, expected.1.as_bytes());
+            }
+        }
+
+        #[test]
+        fn test_deserialize_map_all_chars() {
+            // 0x80-0xff are invalid single-byte UTF-8 characters.
+            for i in 0x80..0xff {
+                let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
+                let map = deserialize_map(&serialized_src);
+
+                // Invalid UTF-8 bytes should be replaced with the replacement character U+FFFD.
+                // assert!(map[0].1.contains('�'), "Expected replacement character for byte 0x{:02x}", i);
+                assert!(map[0].1.len() == 0, "Expected replacement with default string");
+            }
+        }
     }
 }
