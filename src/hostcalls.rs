@@ -238,7 +238,7 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Sta
                             return_size,
                             return_size,
                         ))
-                        .unwrap(),
+                        .unwrap_or_default(),
                     ))
                 } else {
                     Ok(Some(String::new()))
@@ -998,7 +998,7 @@ pub fn get_grpc_status() -> Result<(u32, Option<String>), Status> {
                                 return_size,
                                 return_size,
                             ))
-                            .unwrap(),
+                            .unwrap_or_default(),
                         ),
                     ))
                 } else {
