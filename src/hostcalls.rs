@@ -229,7 +229,7 @@ extern "C" {
     ) -> Status;
 }
 
-pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Status> {
+pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Error> {
     let mut return_data: *mut u8 = null_mut();
     let mut return_size: usize = 0;
     unsafe {
@@ -248,7 +248,7 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Sta
                             return_size,
                             return_size,
                         ))
-                        .unwrap(),
+                        .map_err(Error::InvalidUtf8String)?,
                     ))
                 } else {
                     Ok(Some(String::new()))
@@ -1205,8 +1205,8 @@ mod tests {
 }
 
 mod utils {
-    use crate::types::Bytes;
-    use std::convert::TryFrom;
+    use crate::types::{Bytes, Error};
+    use std::convert::TryInto;
 
     pub(super) fn serialize_property_path(path: Vec<&str>) -> Bytes {
         if path.is_empty() {
@@ -1266,48 +1266,73 @@ mod utils {
     }
 
     pub(super) fn deserialize_map(bytes: &[u8]) -> Vec<(String, String)> {
-        if bytes.is_empty() {
-            return Vec::new();
-        }
-        let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4]).unwrap()) as usize;
-        let mut map = Vec::with_capacity(size);
-        let mut p = 4 + size * 8;
-        for n in 0..size {
-            let s = 4 + n * 8;
-            let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s..s + 4]).unwrap()) as usize;
-            let key = bytes[p..p + size].to_vec();
-            p += size + 1;
-            let size =
-                u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s + 4..s + 8]).unwrap()) as usize;
-            let value = bytes[p..p + size].to_vec();
-            p += size + 1;
-            map.push((
-                String::from_utf8(key).unwrap_or_default(),
-                String::from_utf8(value).unwrap_or_default(),
-            ));
-        }
-        map
+        deserialize_map_bytes(bytes)
+            .into_iter()
+            .map(|(name, value)| (name, String::from_utf8_lossy(&value).into_owned()))
+            .collect()
     }
 
+    #[inline]
     pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
+        deserialize_map_bytes_safe(bytes)
+            .inspect_err(|e| eprintln!("deserialize_map_bytes failed: {e:?}"))
+            .unwrap()
+    }
+
+    #[inline]
+    pub(super) fn deserialize_map_bytes_safe(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, Error> {
         if bytes.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4]).unwrap()) as usize;
+
+        if bytes.len() < 4 {
+            return Err(Error::BufferTooShort);
+        }
+
+        let size = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let mut map = Vec::with_capacity(size);
-        let mut p = 4 + size * 8;
+
+        // Check if header is large enough
+        let header_size = 4 + size.checked_mul(8)
+            .ok_or(Error::BufferOverflow)?;
+        if bytes.len() < header_size {
+            return Err(Error::BufferTooShort);
+        }
+
+        let mut p = header_size;
+
         for n in 0..size {
             let s = 4 + n * 8;
-            let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s..s + 4]).unwrap()) as usize;
-            let key = bytes[p..p + size].to_vec();
-            p += size + 1;
-            let size =
-                u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s + 4..s + 8]).unwrap()) as usize;
-            let value = bytes[p..p + size].to_vec();
-            p += size + 1;
-            map.push((String::from_utf8(key).unwrap_or_default(), value));
+
+            // Read key size
+            let key_size = u32::from_le_bytes(bytes[s..s + 4].try_into().unwrap()) as usize;
+            let key_end = p.checked_add(key_size)
+                .ok_or(Error::BufferOverflow)?;
+            if key_end > bytes.len() {
+                return Err(Error::BufferTooShort);
+            }
+            let key = String::from_utf8(bytes[p..key_end].to_vec())
+                .map_err(Error::InvalidUtf8String)?;
+
+            p = key_end.checked_add(1)
+                .ok_or(Error::BufferOverflow)?;
+
+            // Read value size
+            let value_size = u32::from_le_bytes(bytes[s + 4..s + 8].try_into().unwrap()) as usize;
+            let value_end = p.checked_add(value_size)
+                .ok_or(Error::BufferOverflow)?;
+            if value_end > bytes.len() {
+                return Err(Error::BufferTooShort);
+            }
+            let value = bytes[p..value_end].to_vec();
+
+            p = value_end.checked_add(1)
+                .ok_or(Error::BufferOverflow)?;
+
+            map.push((key, value));
         }
-        map
+
+        Ok(map)
     }
 
     #[cfg(test)]
@@ -1453,8 +1478,8 @@ mod utils {
                 let map = deserialize_map(&serialized_src);
 
                 // Invalid UTF-8 bytes should be replaced with the replacement character U+FFFD.
-                // assert!(map[0].1.contains('�'), "Expected replacement character for byte 0x{:02x}", i);
-                assert!(map[0].1.len() == 0, "Expected replacement with default string");
+                assert!(map[0].1.contains('�'), "Expected replacement character for byte 0x{:02x}", i);
+                // assert!(map[0].1.len() == 0, "Expected replacement with default string");
             }
         }
 
