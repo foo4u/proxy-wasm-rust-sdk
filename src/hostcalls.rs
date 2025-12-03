@@ -156,24 +156,17 @@ fn proxy_get_header_map_pairs(
 }
 
 pub fn get_map(map_type: MapType) -> Result<Vec<(String, String)>, Status> {
-    unsafe {
-        let mut return_data: *mut u8 = null_mut();
-        let mut return_size: usize = 0;
-        match proxy_get_header_map_pairs(map_type, &mut return_data, &mut return_size) {
-            Status::Ok => {
-                if !return_data.is_null() {
-                    let serialized_map = Vec::from_raw_parts(return_data, return_size, return_size);
-                    Ok(utils::deserialize_map(&serialized_map))
-                } else {
-                    Ok(Vec::new())
-                }
-            }
-            status => panic!("unexpected status: {}", status as u32),
-        }
-    }
+    get_map_impl(map_type, |v| String::from_utf8_lossy(&v).into_owned())
 }
 
 pub fn get_map_bytes(map_type: MapType) -> Result<Vec<(String, Bytes)>, Status> {
+    get_map_impl(map_type, |v| v)
+}
+
+fn get_map_impl<F, V>(map_type: MapType, value_mapper: F) -> Result<Vec<(String, V)>, Status>
+where
+    F: Fn(Vec<u8>) -> V,
+{
     unsafe {
         let mut return_data: *mut u8 = null_mut();
         let mut return_size: usize = 0;
@@ -181,7 +174,7 @@ pub fn get_map_bytes(map_type: MapType) -> Result<Vec<(String, Bytes)>, Status> 
             Status::Ok => {
                 if !return_data.is_null() {
                     let serialized_map = Vec::from_raw_parts(return_data, return_size, return_size);
-                    Ok(utils::deserialize_map_bytes(&serialized_map))
+                    Ok(utils::deserialize_map_impl(&serialized_map, value_mapper).unwrap())
                 } else {
                     Ok(Vec::new())
                 }
@@ -229,7 +222,7 @@ extern "C" {
     ) -> Status;
 }
 
-pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Error> {
+pub fn get_map_value(map_type: MapType, key: &str) -> Option<String> {
     let mut return_data: *mut u8 = null_mut();
     let mut return_size: usize = 0;
     unsafe {
@@ -242,19 +235,18 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Err
         ) {
             Status::Ok => {
                 if !return_data.is_null() {
-                    Ok(Some(
-                        String::from_utf8(Vec::from_raw_parts(
+                    Some(
+                        String::from_utf8_lossy(&Vec::from_raw_parts(
                             return_data,
                             return_size,
                             return_size,
-                        ))
-                        .map_err(Error::InvalidUtf8String)?,
-                    ))
+                        )).into_owned()
+                    )
                 } else {
-                    Ok(Some(String::new()))
+                    Some(String::new())
                 }
             }
-            Status::NotFound => Ok(None),
+            Status::NotFound => None,
             status => panic!("unexpected status: {}", status as u32),
         }
     }
@@ -1266,19 +1258,19 @@ mod utils {
     }
 
     pub(super) fn deserialize_map(bytes: &[u8]) -> Vec<(String, String)> {
-        deserialize_map_safe(bytes, |v| String::from_utf8_lossy(&v).into_owned())
+        deserialize_map_impl(bytes, |v| String::from_utf8_lossy(&v).into_owned())
             .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
             .unwrap()
     }
 
     pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
-        deserialize_map_safe(bytes, |v| v)
+        deserialize_map_impl(bytes, |v| v)
             .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
             .unwrap()
     }
 
     #[inline]
-    pub(super) fn deserialize_map_safe<F, V>(bytes: &[u8], value_mapper: F) -> Result<Vec<(String, V)>, Error>
+    pub(super) fn deserialize_map_impl<F, V>(bytes: &[u8], value_mapper: F) -> Result<Vec<(String, V)>, Error>
     where
         F: Fn(Vec<u8>) -> V,
     {
@@ -1290,13 +1282,11 @@ mod utils {
             return Err(Error::BufferTooShort);
         }
 
-        // safe to unwrap due to length check
-        let size = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let size = u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| Error::BufferTooShort)?) as usize;
         let mut map = Vec::with_capacity(size);
 
         // check if header is large enough
-        let header_size = 4 + size.checked_mul(8)
-            .ok_or(Error::BufferOverflow)?;
+        let header_size = 4 + size.checked_mul(8).ok_or(Error::BufferOverflow)?;
         if bytes.len() < header_size {
             return Err(Error::BufferTooShort);
         }
@@ -1306,21 +1296,18 @@ mod utils {
         for n in 0..size {
             let s = 4 + n * 8;
 
-            // Read key size
+            // read key size
             let key_size = u32::from_le_bytes(bytes[s..s + 4].try_into().unwrap()) as usize;
-            let key_end = p.checked_add(key_size)
-                .ok_or(Error::BufferOverflow)?;
+            let key_end = p.checked_add(key_size).ok_or(Error::BufferOverflow)?;
             if key_end > bytes.len() {
                 return Err(Error::BufferTooShort);
             }
-            let key = String::from_utf8(bytes[p..key_end].to_vec())
-                .map_err(Error::InvalidUtf8String)?;
+            let key = String::from_utf8(bytes[p..key_end].to_vec()).map_err(Error::InvalidUtf8String)?;
 
-            p = key_end.checked_add(1)
-                .ok_or(Error::BufferOverflow)?;
+            p = key_end.checked_add(1).ok_or(Error::BufferOverflow)?;
 
-            // Read value size
-            let value_size = u32::from_le_bytes(bytes[s + 4..s + 8].try_into().unwrap()) as usize;
+            // read value size
+            let value_size = u32::from_le_bytes(bytes[s + 4..s + 8].try_into().map_err(|_| Error::BufferOverflow)?) as usize;
             let value_end = p.checked_add(value_size)
                 .ok_or(Error::BufferOverflow)?;
             if value_end > bytes.len() {
