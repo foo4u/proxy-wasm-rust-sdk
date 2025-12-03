@@ -1266,21 +1266,22 @@ mod utils {
     }
 
     pub(super) fn deserialize_map(bytes: &[u8]) -> Vec<(String, String)> {
-        deserialize_map_bytes(bytes)
-            .into_iter()
-            .map(|(name, value)| (name, String::from_utf8_lossy(&value).into_owned()))
-            .collect()
+        deserialize_map_safe(bytes, |v| String::from_utf8_lossy(&v).into_owned())
+            .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
+            .unwrap()
     }
 
-    #[inline]
     pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
-        deserialize_map_bytes_safe(bytes)
-            .inspect_err(|e| eprintln!("deserialize_map_bytes failed: {e:?}"))
+        deserialize_map_safe(bytes, |v| v)
+            .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
             .unwrap()
     }
 
     #[inline]
-    pub(super) fn deserialize_map_bytes_safe(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, Error> {
+    pub(super) fn deserialize_map_safe<F, V>(bytes: &[u8], value_mapper: F) -> Result<Vec<(String, V)>, Error>
+    where
+        F: Fn(Vec<u8>) -> V,
+    {
         if bytes.is_empty() {
             return Ok(Vec::new());
         }
@@ -1289,10 +1290,11 @@ mod utils {
             return Err(Error::BufferTooShort);
         }
 
+        // safe to unwrap due to length check
         let size = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let mut map = Vec::with_capacity(size);
 
-        // Check if header is large enough
+        // check if header is large enough
         let header_size = 4 + size.checked_mul(8)
             .ok_or(Error::BufferOverflow)?;
         if bytes.len() < header_size {
@@ -1329,7 +1331,7 @@ mod utils {
             p = value_end.checked_add(1)
                 .ok_or(Error::BufferOverflow)?;
 
-            map.push((key, value));
+            map.push((key, value_mapper(value)));
         }
 
         Ok(map)
