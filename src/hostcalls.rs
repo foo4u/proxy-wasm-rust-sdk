@@ -1198,7 +1198,7 @@ mod tests {
 }
 
 mod utils {
-    use crate::types::{Bytes};
+    use crate::types::Bytes;
     use std::convert::TryInto;
     use std::fmt::Display;
 
