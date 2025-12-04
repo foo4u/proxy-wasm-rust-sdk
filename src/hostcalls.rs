@@ -163,6 +163,7 @@ pub fn get_map_bytes(map_type: MapType) -> Result<Vec<(String, Bytes)>, Status> 
     get_map_impl(map_type, |v| v)
 }
 
+#[inline]
 fn get_map_impl<F, V>(map_type: MapType, value_mapper: F) -> Result<Vec<(String, V)>, Status>
 where
     F: Fn(Vec<u8>) -> V,
@@ -1197,8 +1198,24 @@ mod tests {
 }
 
 mod utils {
-    use crate::types::{Bytes, Error};
+    use crate::types::{Bytes};
     use std::convert::TryInto;
+    use std::fmt::Display;
+
+    #[derive(Debug)]
+    pub enum Error {
+        BufferTooShort,
+        BufferOverflow,
+    }
+
+    impl Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Error::BufferTooShort => write!(f, "buffer too short"),
+                Error::BufferOverflow => write!(f, "buffer overflow"),
+            }
+        }
+    }
 
     pub(super) fn serialize_property_path(path: Vec<&str>) -> Bytes {
         if path.is_empty() {
@@ -1257,13 +1274,15 @@ mod utils {
         bytes
     }
 
-    pub(super) fn deserialize_map(bytes: &[u8]) -> Vec<(String, String)> {
+    #[cfg(test)]
+    fn deserialize_map_strings(bytes: &[u8]) -> Vec<(String, String)> {
         deserialize_map_impl(bytes, |v| String::from_utf8_lossy(&v).into_owned())
             .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
             .unwrap()
     }
 
-    pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
+    #[cfg(test)]
+    fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
         deserialize_map_impl(bytes, |v| v)
             .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
             .unwrap()
@@ -1278,9 +1297,9 @@ mod utils {
             return Ok(Vec::new());
         }
 
-        if bytes.len() < 4 {
-            return Err(Error::BufferTooShort);
-        }
+        // if bytes.len() < 4 {
+        //     return Err(Error::BufferTooShort);
+        // }
 
         let size = u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| Error::BufferTooShort)?) as usize;
         let mut map = Vec::with_capacity(size);
@@ -1302,21 +1321,19 @@ mod utils {
             if key_end > bytes.len() {
                 return Err(Error::BufferTooShort);
             }
-            let key = String::from_utf8(bytes[p..key_end].to_vec()).map_err(Error::InvalidUtf8String)?;
+            let key = String::from_utf8_lossy(&bytes[p..key_end].to_vec()).into_owned();
 
             p = key_end.checked_add(1).ok_or(Error::BufferOverflow)?;
 
             // read value size
             let value_size = u32::from_le_bytes(bytes[s + 4..s + 8].try_into().map_err(|_| Error::BufferOverflow)?) as usize;
-            let value_end = p.checked_add(value_size)
-                .ok_or(Error::BufferOverflow)?;
+            let value_end = p.checked_add(value_size).ok_or(Error::BufferOverflow)?;
             if value_end > bytes.len() {
                 return Err(Error::BufferTooShort);
             }
             let value = bytes[p..value_end].to_vec();
 
-            p = value_end.checked_add(1)
-                .ok_or(Error::BufferOverflow)?;
+            p = value_end.checked_add(1).ok_or(Error::BufferOverflow)?;
 
             map.push((key, value_mapper(value)));
         }
@@ -1382,9 +1399,9 @@ mod utils {
 
         #[test]
         fn test_deserialize_map_empty() {
-            let map = deserialize_map(&[]);
+            let map = deserialize_map_strings(&[]);
             assert_eq!(map, []);
-            let map = deserialize_map(&[0, 0, 0, 0]);
+            let map = deserialize_map_strings(&[0, 0, 0, 0]);
             assert_eq!(map, []);
         }
 
@@ -1411,7 +1428,7 @@ mod utils {
 
         #[test]
         fn test_deserialize_map() {
-            let map = deserialize_map(SERIALIZED_MAP);
+            let map = deserialize_map_strings(SERIALIZED_MAP);
             assert_eq!(map.len(), MAP.len());
             for (got, expected) in map.into_iter().zip(MAP) {
                 assert_eq!(got.0, expected.0);
@@ -1431,7 +1448,7 @@ mod utils {
 
         #[test]
         fn test_deserialize_map_roundtrip() {
-            let map = deserialize_map(SERIALIZED_MAP);
+            let map = deserialize_map_strings(SERIALIZED_MAP);
             // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
             let map_refs: Vec<(&str, &str)> =
                 map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
@@ -1454,7 +1471,7 @@ mod utils {
             // 0x00-0x7f are valid single-byte UTF-8 characters.
             for i in 0..0x7f {
                 let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
-                let map = deserialize_map(&serialized_src);
+                let map = deserialize_map_strings(&serialized_src);
                 // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
                 let map_refs: Vec<(&str, &str)> =
                     map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
@@ -1464,7 +1481,7 @@ mod utils {
             // 0x80-0xff are invalid single-byte UTF-8 characters.
             for i in 0x80..0xff {
                 let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
-                let map = deserialize_map(&serialized_src);
+                let map = deserialize_map_strings(&serialized_src);
 
                 // Invalid UTF-8 bytes should be replaced with the replacement character U+FFFD.
                 assert!(map[0].1.contains('�'), "Expected replacement character for byte 0x{:02x}", i);
@@ -1509,7 +1526,7 @@ mod utils {
         fn bench_deserialize_map(b: &mut Bencher) {
             let serialized_map = SERIALIZED_MAP.to_vec();
             b.iter(|| {
-                deserialize_map(test::black_box(&serialized_map));
+                deserialize_map_strings(test::black_box(&serialized_map));
             });
         }
 

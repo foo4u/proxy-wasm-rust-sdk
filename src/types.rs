@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::string::FromUtf8Error;
 use crate::traits::*;
 
 pub type NewRootContext = fn(context_id: u32) -> Box<dyn RootContext>;
 pub type NewStreamContext = fn(context_id: u32, root_context_id: u32) -> Box<dyn StreamContext>;
 pub type NewHttpContext = fn(context_id: u32, root_context_id: u32) -> Box<dyn HttpContext>;
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidUtf8String(FromUtf8Error),
-    BufferTooShort,
-    BufferOverflow,
-}
 
 #[repr(u32)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
