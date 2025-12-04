@@ -223,7 +223,7 @@ extern "C" {
     ) -> Status;
 }
 
-pub fn get_map_value(map_type: MapType, key: &str) -> Option<String> {
+pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Status> {
     let mut return_data: *mut u8 = null_mut();
     let mut return_size: usize = 0;
     unsafe {
@@ -236,18 +236,18 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Option<String> {
         ) {
             Status::Ok => {
                 if !return_data.is_null() {
-                    Some(
+                    Ok(Some(
                         String::from_utf8_lossy(&Vec::from_raw_parts(
                             return_data,
                             return_size,
                             return_size,
                         )).into_owned()
-                    )
+                    ))
                 } else {
-                    Some(String::new())
+                    Ok(Some(String::new()))
                 }
             }
-            Status::NotFound => None,
+            Status::NotFound => Ok(None),
             status => panic!("unexpected status: {}", status as u32),
         }
     }

@@ -91,7 +91,7 @@ pub trait Context {
     }
 
     fn get_http_call_response_header(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpCallResponseHeaders, name)
+        hostcalls::get_map_value(MapType::HttpCallResponseHeaders, name).unwrap()
     }
 
     fn get_http_call_response_header_bytes(&self, name: &str) -> Option<Bytes> {
@@ -111,7 +111,7 @@ pub trait Context {
     }
 
     fn get_http_call_response_trailer(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpCallResponseTrailers, name)
+        hostcalls::get_map_value(MapType::HttpCallResponseTrailers, name).unwrap()
     }
 
     fn get_http_call_response_trailer_bytes(&self, name: &str) -> Option<Bytes> {
@@ -334,7 +334,7 @@ pub trait HttpContext: Context {
     }
 
     fn get_http_request_header(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpRequestHeaders, name)
+        hostcalls::get_map_value(MapType::HttpRequestHeaders, name).unwrap()
     }
 
     fn get_http_request_header_bytes(&self, name: &str) -> Option<Bytes> {
@@ -394,7 +394,7 @@ pub trait HttpContext: Context {
     }
 
     fn get_http_request_trailer(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpRequestTrailers, name)
+        hostcalls::get_map_value(MapType::HttpRequestTrailers, name).unwrap()
     }
 
     fn get_http_request_trailer_bytes(&self, name: &str) -> Option<Bytes> {
@@ -450,7 +450,7 @@ pub trait HttpContext: Context {
     }
 
     fn get_http_response_header(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpResponseHeaders, name)
+        hostcalls::get_map_value(MapType::HttpResponseHeaders, name).unwrap()
     }
 
     fn get_http_response_header_bytes(&self, name: &str) -> Option<Bytes> {
@@ -510,7 +510,7 @@ pub trait HttpContext: Context {
     }
 
     fn get_http_response_trailer(&self, name: &str) -> Option<String> {
-        hostcalls::get_map_value(MapType::HttpResponseTrailers, name)
+        hostcalls::get_map_value(MapType::HttpResponseTrailers, name).unwrap()
     }
 
     fn get_http_response_trailer_bytes(&self, name: &str) -> Option<Bytes> {
