@@ -1274,20 +1274,6 @@ mod utils {
         bytes
     }
 
-    #[cfg(test)]
-    fn deserialize_map_strings(bytes: &[u8]) -> Vec<(String, String)> {
-        deserialize_map_impl(bytes, |v| String::from_utf8_lossy(&v).into_owned())
-            .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
-            .unwrap()
-    }
-
-    #[cfg(test)]
-    fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
-        deserialize_map_impl(bytes, |v| v)
-            .inspect_err(|e| eprintln!("deserialize_map_safe failed: {e:?}"))
-            .unwrap()
-    }
-
     #[inline]
     pub(super) fn deserialize_map_impl<F, V>(bytes: &[u8], value_mapper: F) -> Result<Vec<(String, V)>, Error>
     where
@@ -1355,6 +1341,9 @@ mod utils {
             ("Powered-By", "proxy-wasm"),
         ];
 
+        static BYTES_MAPPER: fn(Bytes) -> Bytes = |v| v;
+        static STRING_MAPPER: fn(Bytes) -> String = |v| String::from_utf8_lossy(&v).into_owned();
+
         #[rustfmt::skip]
         pub(in crate::hostcalls) static SERIALIZED_MAP: &[u8] = &[
             // num entries
@@ -1384,6 +1373,14 @@ mod utils {
             // "proxy-wasm"
             112, 114, 111, 120, 121, 45, 119, 97, 115, 109, 0,
         ];
+
+        fn deserialize_map_strings(bytes: &[u8]) -> Vec<(String, String)> {
+            deserialize_map_impl(bytes, STRING_MAPPER).expect("deserialize_map failed")
+        }
+
+        fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
+            deserialize_map_impl(bytes, BYTES_MAPPER).expect("deserialize_map failed")
+        }
 
         #[test]
         fn test_serialize_map_empty() {
