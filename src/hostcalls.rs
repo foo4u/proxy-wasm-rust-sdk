@@ -241,7 +241,8 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Sta
                             return_data,
                             return_size,
                             return_size,
-                        )).into_owned()
+                        ))
+                        .into_owned(),
                     ))
                 } else {
                     Ok(Some(String::new()))
@@ -1275,7 +1276,10 @@ mod utils {
     }
 
     #[inline]
-    pub(super) fn deserialize_map_impl<F, V>(bytes: &[u8], value_mapper: F) -> Result<Vec<(String, V)>, Error>
+    pub(super) fn deserialize_map_impl<F, V>(
+        bytes: &[u8],
+        value_mapper: F,
+    ) -> Result<Vec<(String, V)>, Error>
     where
         F: Fn(Vec<u8>) -> V,
     {
@@ -1283,9 +1287,9 @@ mod utils {
             return Ok(Vec::new());
         }
 
-        // if bytes.len() < 4 {
-        //     return Err(Error::BufferTooShort);
-        // }
+        if bytes.len() < 4 {
+            return Err(Error::BufferTooShort);
+        }
 
         let size = u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| Error::BufferTooShort)?) as usize;
         let mut map = Vec::with_capacity(size);
@@ -1312,7 +1316,11 @@ mod utils {
             p = key_end.checked_add(1).ok_or(Error::BufferOverflow)?;
 
             // read value size
-            let value_size = u32::from_le_bytes(bytes[s + 4..s + 8].try_into().map_err(|_| Error::BufferOverflow)?) as usize;
+            let value_size = u32::from_le_bytes(
+                bytes[s + 4..s + 8]
+                    .try_into()
+                    .map_err(|_| Error::BufferOverflow)?,
+            ) as usize;
             let value_end = p.checked_add(value_size).ok_or(Error::BufferOverflow)?;
             if value_end > bytes.len() {
                 return Err(Error::BufferTooShort);
@@ -1481,8 +1489,11 @@ mod utils {
                 let map = deserialize_map_strings(&serialized_src);
 
                 // Invalid UTF-8 bytes should be replaced with the replacement character U+FFFD.
-                assert!(map[0].1.contains('�'), "Expected replacement character for byte 0x{:02x}", i);
-                // assert!(map[0].1.len() == 0, "Expected replacement with default string");
+                assert!(
+                    map[0].1.contains('�'),
+                    "Expected replacement character for byte 0x{:02x}",
+                    i
+                );
             }
         }
 
